@@ -48,6 +48,21 @@ func npvm(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *uint32
 	return err
 }
 
+//NtAllocateVirtualMemory
+func nva(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
+	procVA, e := gabh.GetSSNByNameExcept(string([]byte{'N','t','A','l','l','o','c','a','t','e','V','i','r','t','u','a','l','M','e','m','o','r','y'}),nil)
+	if procVA == 0 {
+		return 0, e
+	}
+	call := gabh.GetRecyCall("", nil, nil)
+	r, e := gabh.ReCycall(uint16(procVA), call, uintptr(0xffffffffffffffff), uintptr(unsafe.Pointer(&addr)), 0, uintptr(unsafe.Pointer(&size)), uintptr(allocType), uintptr(protect))
+	if r != 0 {
+		return 0, e
+	}
+	return addr, nil
+}
+
+
 
 func (head *addressList) free() {
 	for node := head; node != nil; node = node.next {
@@ -80,7 +95,7 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 			if sectionSize == 0 {
 				continue
 			}
-			dest, err := gabh.NvA(module.codeBase+uintptr(sections[i].VirtualAddress),
+			dest, err := nva(module.codeBase+uintptr(sections[i].VirtualAddress),
 				uintptr(sectionSize),
 				windows.MEM_COMMIT,
 				windows.PAGE_READWRITE)
@@ -105,7 +120,7 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 		}
 
 		// Commit memory block and copy data from dll.
-		dest, err := gabh.NvA(module.codeBase+uintptr(sections[i].VirtualAddress),
+		dest, err := nva(module.codeBase+uintptr(sections[i].VirtualAddress),
 			uintptr(sections[i].SizeOfRawData),
 			windows.MEM_COMMIT,
 			windows.PAGE_READWRITE)
@@ -536,13 +551,13 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 
 	// Reserve memory for image of library.
 	// TODO: Is it correct to commit the complete memory region at once? Calling DllEntry raises an exception if we don't.
-	module.codeBase, err = gabh.NvA(oldHeader.OptionalHeader.ImageBase,
+	module.codeBase, err = nva(oldHeader.OptionalHeader.ImageBase,
 		alignedImageSize,
 		windows.MEM_RESERVE|windows.MEM_COMMIT,
 		windows.PAGE_READWRITE)
 	if err != nil {
 		// Try to allocate memory at arbitrary position.
-		module.codeBase, err = gabh.NvA(0,
+		module.codeBase, err = nva(0,
 			alignedImageSize,
 			windows.MEM_RESERVE|windows.MEM_COMMIT,
 			windows.PAGE_READWRITE)
@@ -562,7 +577,7 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		return
 	}
 	// Commit memory for headers.
-	headers, err := gabh.NvA(module.codeBase,
+	headers, err := nva(module.codeBase,
 		uintptr(oldHeader.OptionalHeader.SizeOfHeaders),
 		windows.MEM_COMMIT,
 		windows.PAGE_READWRITE)
