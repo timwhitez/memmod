@@ -42,7 +42,10 @@ func npvm_noSys(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *
 		0,
 	)
 
-	return fmt.Errorf("0x%x", r)
+	if r != 0 {
+		return fmt.Errorf("0x%x", r)
+	}
+	return nil
 }
 
 func npvm(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *uint32) error {
