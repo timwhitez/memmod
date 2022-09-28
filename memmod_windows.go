@@ -21,21 +21,38 @@ type addressList struct {
 	next    *addressList
 	address uintptr
 }
-func nfvm(address uintptr, size uintptr, freetype uint32)error{
-	NFVM,_ := gabh.GetSSNByNameExcept(string([]byte{'N','t','F','r','e','e','V','i','r','t','u','a','l','M','e','m','o','r','y'}),nil)
-	call := gabh.GetRecyCall("",nil,nil)
-	_,err := gabh.ReCycall(uint16(NFVM),call,0xffffffffffffffff,uintptr(unsafe.Pointer(&address)),uintptr(unsafe.Pointer(&size)), uintptr(freetype))
-	return err
+
+func nfvm(address uintptr, size uintptr, freetype uint32) {
+	NFVM := syscall.NewLazyDLL(string([]byte{'n', 't', 'd', 'l', 'l'})).NewProc(string([]byte{'N', 't', 'F', 'r', 'e', 'e', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'})).Addr()
+	syscall.Syscall6(NFVM, 4, 0xffffffffffffffff, uintptr(unsafe.Pointer(&address)), uintptr(unsafe.Pointer(&size)), uintptr(freetype), 0, 0)
+}
+
+func npvm_noSys(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *uint32) error {
+	//NtProtectVirtualMemory
+	ptr := syscall.NewLazyDLL(string([]byte{'n', 't', 'd', 'l', 'l'})).NewProc(string([]byte{'N', 't', 'P', 'r', 'o', 't', 'e', 'c', 't', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'})).Addr()
+
+	r, _, _ := syscall.Syscall6(
+		ptr,
+		5,
+		0xffffffffffffffff,
+		uintptr(unsafe.Pointer(&baseAddress)),
+		uintptr(unsafe.Pointer(&regionSize)),
+		uintptr(NewProtect),
+		uintptr(unsafe.Pointer(oldprotect)),
+		0,
+	)
+
+	return fmt.Errorf("0x%x", r)
 }
 
 func npvm(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *uint32) error {
 	//NtProtectVirtualMemory
-	sysid, err := gabh.GetSSNByNameExcept(string([]byte{'N','t','P','r','o','t','e','c','t','V','i','r','t','u','a','l','M','e','m','o','r','y'}), nil)
+	sysid, err := gabh.GetSSNByNameExcept(string([]byte{'N', 't', 'P', 'r', 'o', 't', 'e', 'c', 't', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'}), nil)
 	if sysid == 0 {
 		return err
 	}
-	call := gabh.GetRecyCall("",nil,nil)
-	_,err = gabh.ReCycall(
+	call := gabh.GetRecyCall("", nil, nil)
+	_, err = gabh.ReCycall(
 		uint16(sysid),
 		call,
 		0xffffffffffffffff,
@@ -48,9 +65,20 @@ func npvm(baseAddress, regionSize uintptr, NewProtect uint32, oldprotect *uint32
 	return err
 }
 
-//NtAllocateVirtualMemory
+func nva_noSys(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
+	//NtProtectVirtualMemory
+	ptr := syscall.NewLazyDLL(string([]byte{'n', 't', 'd', 'l', 'l'})).NewProc(string([]byte{'N', 't', 'A', 'l', 'l', 'o', 'c', 'a', 't', 'e', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'})).Addr()
+
+	r, _, e := syscall.Syscall6(ptr, 6, uintptr(0xffffffffffffffff), uintptr(unsafe.Pointer(&addr)), 0, uintptr(unsafe.Pointer(&size)), uintptr(allocType), uintptr(protect))
+	if r != 0 {
+		return 0, e
+	}
+	return addr, nil
+}
+
+// NtAllocateVirtualMemory
 func nva(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
-	procVA, e := gabh.GetSSNByNameExcept(string([]byte{'N','t','A','l','l','o','c','a','t','e','V','i','r','t','u','a','l','M','e','m','o','r','y'}),nil)
+	procVA, e := gabh.GetSSNByNameExcept(string([]byte{'N', 't', 'A', 'l', 'l', 'o', 'c', 'a', 't', 'e', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'}), nil)
 	if procVA == 0 {
 		return 0, e
 	}
@@ -61,8 +89,6 @@ func nva(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
 	}
 	return addr, nil
 }
-
-
 
 func (head *addressList) free() {
 	for node := head; node != nil; node = node.next {
@@ -80,6 +106,7 @@ type Module struct {
 	nameExports   map[string]uint16
 	entry         uintptr
 	blockedMemory *addressList
+	syscall       bool
 }
 
 func (module *Module) headerDirectory(idx int) *IMAGE_DATA_DIRECTORY {
@@ -95,10 +122,20 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 			if sectionSize == 0 {
 				continue
 			}
-			dest, err := nva(module.codeBase+uintptr(sections[i].VirtualAddress),
-				uintptr(sectionSize),
-				windows.MEM_COMMIT,
-				windows.PAGE_READWRITE)
+			var dest uintptr
+			var err error
+			if module.syscall {
+				dest, err = nva(module.codeBase+uintptr(sections[i].VirtualAddress),
+					uintptr(sectionSize),
+					windows.MEM_COMMIT,
+					windows.PAGE_READWRITE)
+			} else {
+				dest, err = nva_noSys(module.codeBase+uintptr(sections[i].VirtualAddress),
+					uintptr(sectionSize),
+					windows.MEM_COMMIT,
+					windows.PAGE_READWRITE)
+			}
+
 			if err != nil {
 				return fmt.Errorf("Error allocating section: %w", err)
 			}
@@ -119,11 +156,21 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 			return errors.New("Incomplete section")
 		}
 
+		var dest uintptr
+		var err error
 		// Commit memory block and copy data from dll.
-		dest, err := nva(module.codeBase+uintptr(sections[i].VirtualAddress),
-			uintptr(sections[i].SizeOfRawData),
-			windows.MEM_COMMIT,
-			windows.PAGE_READWRITE)
+		if module.syscall {
+			dest, err = nva(module.codeBase+uintptr(sections[i].VirtualAddress),
+				uintptr(sections[i].SizeOfRawData),
+				windows.MEM_COMMIT,
+				windows.PAGE_READWRITE)
+		} else {
+			dest, err = nva_noSys(module.codeBase+uintptr(sections[i].VirtualAddress),
+				uintptr(sections[i].SizeOfRawData),
+				windows.MEM_COMMIT,
+				windows.PAGE_READWRITE)
+		}
+
 		if err != nil {
 			return fmt.Errorf("Error allocating memory block: %w", err)
 		}
@@ -196,7 +243,16 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 
 	// Change memory access flags.
 	var oldProtect uint32
-	err := npvm(sectionData.address, sectionData.size, protect, &oldProtect)
+	if module.syscall {
+		err := npvm(sectionData.address, sectionData.size, protect, &oldProtect)
+		if err != nil {
+			return fmt.Errorf("Error protecting memory page: %w", err)
+		}
+
+		return nil
+	}
+
+	err := npvm_noSys(sectionData.address, sectionData.size, protect, &oldProtect)
 	if err != nil {
 		return fmt.Errorf("Error protecting memory page: %w", err)
 	}
@@ -437,7 +493,7 @@ var loadedAddressRangesMu sync.RWMutex
 var haveHookedRtlPcToFileHeader sync.Once
 var hookRtlPcToFileHeaderResult error
 
-func hookRtlPcToFileHeader() error {
+func hookRtlPcToFileHeader(scall bool) error {
 	var kernelBase windows.Handle
 	err := windows.GetModuleHandleEx(windows.GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, windows.StringToUTF16Ptr("kernelbase.dll"), &kernelBase)
 	if err != nil {
@@ -447,9 +503,9 @@ func hookRtlPcToFileHeader() error {
 	dosHeader := (*IMAGE_DOS_HEADER)(imageBase)
 	ntHeaders := (*IMAGE_NT_HEADERS)(unsafe.Add(imageBase, (dosHeader.E_lfanew)))
 	importsDirectory := ntHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
-	importDescriptor := (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(imageBase,  (importsDirectory.VirtualAddress)))
-	for ; importDescriptor.Name != 0; importDescriptor = (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(unsafe.Pointer(importDescriptor),  (unsafe.Sizeof(*importDescriptor)))) {
-		libraryName := windows.BytePtrToString((*byte)(unsafe.Add(imageBase,  (importDescriptor.Name))))
+	importDescriptor := (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(imageBase, (importsDirectory.VirtualAddress)))
+	for ; importDescriptor.Name != 0; importDescriptor = (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(unsafe.Pointer(importDescriptor), (unsafe.Sizeof(*importDescriptor)))) {
+		libraryName := windows.BytePtrToString((*byte)(unsafe.Add(imageBase, (importDescriptor.Name))))
 		if strings.EqualFold(libraryName, "ntdll.dll") {
 			break
 		}
@@ -457,8 +513,8 @@ func hookRtlPcToFileHeader() error {
 	if importDescriptor.Name == 0 {
 		return errors.New("ntdll.dll not found")
 	}
-	originalThunk := (*uintptr)(unsafe.Add(imageBase,  (importDescriptor.OriginalFirstThunk())))
-	thunk := (*uintptr)(unsafe.Add(imageBase,  (importDescriptor.FirstThunk)))
+	originalThunk := (*uintptr)(unsafe.Add(imageBase, (importDescriptor.OriginalFirstThunk())))
+	thunk := (*uintptr)(unsafe.Add(imageBase, (importDescriptor.FirstThunk)))
 	for ; *originalThunk != 0; originalThunk = (*uintptr)(unsafe.Add(unsafe.Pointer(originalThunk), (unsafe.Sizeof(*originalThunk)))) {
 		if *originalThunk&IMAGE_ORDINAL_FLAG == 0 {
 			function := (*IMAGE_IMPORT_BY_NAME)(unsafe.Add(imageBase, (*originalThunk)))
@@ -467,13 +523,18 @@ func hookRtlPcToFileHeader() error {
 				break
 			}
 		}
-		thunk = (*uintptr)(unsafe.Add(unsafe.Pointer(thunk),  (unsafe.Sizeof(*thunk))))
+		thunk = (*uintptr)(unsafe.Add(unsafe.Pointer(thunk), (unsafe.Sizeof(*thunk))))
 	}
 	if *originalThunk == 0 {
 		return errors.New("RtlPcToFileHeader not found")
 	}
 	var oldProtect uint32
-	err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), windows.PAGE_READWRITE, &oldProtect)
+	if scall {
+		err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), windows.PAGE_READWRITE, &oldProtect)
+	} else {
+		err = npvm_noSys(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), windows.PAGE_READWRITE, &oldProtect)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -490,7 +551,12 @@ func hookRtlPcToFileHeader() error {
 		ret, _, _ := syscall.Syscall(originalRtlPcToFileHeader, 2, pcValue, uintptr(unsafe.Pointer(baseOfImage)), 0)
 		return ret
 	})
-	err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), oldProtect, &oldProtect)
+	if scall {
+		err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), oldProtect, &oldProtect)
+	} else {
+		err = npvm_noSys(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), oldProtect, &oldProtect)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -542,6 +608,173 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	}
 
 	module = &Module{isDLL: (oldHeader.FileHeader.Characteristics & IMAGE_FILE_DLL) != 0}
+	module.syscall = false
+	defer func() {
+		if err != nil {
+			module.Free()
+			module = nil
+		}
+	}()
+
+	// Reserve memory for image of library.
+	// TODO: Is it correct to commit the complete memory region at once? Calling DllEntry raises an exception if we don't.
+	module.codeBase, err = nva_noSys(oldHeader.OptionalHeader.ImageBase,
+		alignedImageSize,
+		windows.MEM_RESERVE|windows.MEM_COMMIT,
+		windows.PAGE_READWRITE)
+	if err != nil {
+		// Try to allocate memory at arbitrary position.
+		module.codeBase, err = nva_noSys(0,
+			alignedImageSize,
+			windows.MEM_RESERVE|windows.MEM_COMMIT,
+			windows.PAGE_READWRITE)
+		if err != nil {
+			err = fmt.Errorf("Error allocating code: %w", err)
+			return
+		}
+	}
+	err = module.check4GBBoundaries(alignedImageSize)
+	if err != nil {
+		err = fmt.Errorf("Error reallocating code: %w", err)
+		return
+	}
+
+	if size < uintptr(oldHeader.OptionalHeader.SizeOfHeaders) {
+		err = errors.New("Incomplete headers")
+		return
+	}
+	// Commit memory for headers.
+	headers, err := nva_noSys(module.codeBase,
+		uintptr(oldHeader.OptionalHeader.SizeOfHeaders),
+		windows.MEM_COMMIT,
+		windows.PAGE_READWRITE)
+	if err != nil {
+		err = fmt.Errorf("Error allocating headers: %w", err)
+		return
+	}
+	// Copy PE header to code.
+	memcpy(headers, addr, uintptr(oldHeader.OptionalHeader.SizeOfHeaders))
+	module.headers = (*IMAGE_NT_HEADERS)(a2p(headers + uintptr(dosHeader.E_lfanew)))
+
+	// Update position.
+	module.headers.OptionalHeader.ImageBase = module.codeBase
+
+	// Copy sections from DLL file block to new memory location.
+	err = module.copySections(addr, size, oldHeader)
+	if err != nil {
+		err = fmt.Errorf("Error copying sections: %w", err)
+		return
+	}
+
+	// Adjust base address of imported data.
+	locationDelta := module.headers.OptionalHeader.ImageBase - oldHeader.OptionalHeader.ImageBase
+	if locationDelta != 0 {
+		module.isRelocated, err = module.performBaseRelocation(locationDelta)
+		if err != nil {
+			err = fmt.Errorf("Error relocating module: %w", err)
+			return
+		}
+	} else {
+		module.isRelocated = true
+	}
+
+	// Load required dlls and adjust function table of imports.
+	err = module.buildImportTable()
+	if err != nil {
+		err = fmt.Errorf("Error building import table: %w", err)
+		return
+	}
+
+	// Mark memory pages depending on section headers and release sections that are marked as "discardable".
+	err = module.finalizeSections()
+	if err != nil {
+		err = fmt.Errorf("Error finalizing sections: %w", err)
+		return
+	}
+
+	// Register exception tables, if they exist.
+	module.registerExceptionHandlers()
+
+	// Register function PCs.
+	loadedAddressRangesMu.Lock()
+	loadedAddressRanges = append(loadedAddressRanges, addressRange{module.codeBase, module.codeBase + alignedImageSize})
+	loadedAddressRangesMu.Unlock()
+	haveHookedRtlPcToFileHeader.Do(func() {
+		hookRtlPcToFileHeaderResult = hookRtlPcToFileHeader(false)
+	})
+	err = hookRtlPcToFileHeaderResult
+	if err != nil {
+		return
+	}
+
+	// TLS callbacks are executed BEFORE the main loading.
+	module.executeTLS()
+
+	// Get entry point of loaded module.
+	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
+		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
+		if module.isDLL {
+			// Notify library about attaching to process.
+			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
+			successful := r0 != 0
+			if !successful {
+				err = windows.ERROR_DLL_INIT_FAILED
+				return
+			}
+			module.initialized = true
+		}
+	}
+
+	module.buildNameExports()
+	return
+}
+
+// LoadLibrary loads module image to memory.
+func LoadLibrarySyscall(data []byte) (module *Module, err error) {
+	addr := uintptr(unsafe.Pointer(&data[0]))
+	size := uintptr(len(data))
+	if size < unsafe.Sizeof(IMAGE_DOS_HEADER{}) {
+		return nil, errors.New("Incomplete IMAGE_DOS_HEADER")
+	}
+	dosHeader := (*IMAGE_DOS_HEADER)(a2p(addr))
+	if dosHeader.E_magic != IMAGE_DOS_SIGNATURE {
+		return nil, fmt.Errorf("Not an MS-DOS binary (provided: %x, expected: %x)", dosHeader.E_magic, IMAGE_DOS_SIGNATURE)
+	}
+	if (size < uintptr(dosHeader.E_lfanew)+unsafe.Sizeof(IMAGE_NT_HEADERS{})) {
+		return nil, errors.New("Incomplete IMAGE_NT_HEADERS")
+	}
+	oldHeader := (*IMAGE_NT_HEADERS)(a2p(addr + uintptr(dosHeader.E_lfanew)))
+	if oldHeader.Signature != IMAGE_NT_SIGNATURE {
+		return nil, fmt.Errorf("Not an NT binary (provided: %x, expected: %x)", oldHeader.Signature, IMAGE_NT_SIGNATURE)
+	}
+	if oldHeader.FileHeader.Machine != imageFileProcess {
+		return nil, fmt.Errorf("Foreign platform (provided: %x, expected: %x)", oldHeader.FileHeader.Machine, imageFileProcess)
+	}
+	if (oldHeader.OptionalHeader.SectionAlignment & 1) != 0 {
+		return nil, errors.New("Unaligned section")
+	}
+	lastSectionEnd := uintptr(0)
+	sections := oldHeader.Sections()
+	optionalSectionSize := oldHeader.OptionalHeader.SectionAlignment
+	for i := range sections {
+		var endOfSection uintptr
+		if sections[i].SizeOfRawData == 0 {
+			// Section without data in the DLL
+			endOfSection = uintptr(sections[i].VirtualAddress) + uintptr(optionalSectionSize)
+		} else {
+			endOfSection = uintptr(sections[i].VirtualAddress) + uintptr(sections[i].SizeOfRawData)
+		}
+		if endOfSection > lastSectionEnd {
+			lastSectionEnd = endOfSection
+		}
+	}
+	alignedImageSize := alignUp(uintptr(oldHeader.OptionalHeader.SizeOfImage), uintptr(oldHeader.OptionalHeader.SectionAlignment))
+	if alignedImageSize != alignUp(lastSectionEnd, uintptr(oldHeader.OptionalHeader.SectionAlignment)) {
+		return nil, errors.New("Section is not page-aligned")
+	}
+
+	module = &Module{isDLL: (oldHeader.FileHeader.Characteristics & IMAGE_FILE_DLL) != 0}
+	module.syscall = true
 	defer func() {
 		if err != nil {
 			module.Free()
@@ -633,7 +866,7 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	loadedAddressRanges = append(loadedAddressRanges, addressRange{module.codeBase, module.codeBase + alignedImageSize})
 	loadedAddressRangesMu.Unlock()
 	haveHookedRtlPcToFileHeader.Do(func() {
-		hookRtlPcToFileHeaderResult = hookRtlPcToFileHeader()
+		hookRtlPcToFileHeaderResult = hookRtlPcToFileHeader(true)
 	})
 	err = hookRtlPcToFileHeaderResult
 	if err != nil {
