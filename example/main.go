@@ -31,17 +31,16 @@ func main() {
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
 
-	if len(os.Args) == 3 {
-		p, _ := mod.ProcAddressByName(funcs)
-		fmt.Printf("%s: 0x%x\n", funcs, p)
-		fmt.Print("Press 'Enter' to continue...")
-		bufio.NewReader(os.Stdin).ReadBytes('\n')
-
-		p, _ = mod1.ProcAddressByName(funcs)
-		fmt.Printf("Syscall_%s: 0x%x\n", funcs, p)
-		fmt.Print("Press 'Enter' to continue...")
-		bufio.NewReader(os.Stdin).ReadBytes('\n')
-	}
+	p, _ := mod.ProcAddressByName(funcs)
+	fmt.Printf("%s: 0x%x\n", funcs, p)
+	fmt.Print("Press 'Enter' to continue...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 	mod.Free()
+
+	p, _ = mod1.ProcAddressByName(funcs)
+	fmt.Printf("Syscall_%s: 0x%x\n", funcs, p)
+	fmt.Print("Press 'Enter' to continue...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+
 	mod1.Free()
 }
