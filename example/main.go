@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/timwhitez/memmod"
 	"os"
+	"syscall"
 )
 
 func main() {
@@ -35,10 +36,19 @@ func main() {
 	fmt.Printf("%s: 0x%x\n", funcs, p)
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
+
+	syscall.SyscallN(p)
+
+	fmt.Print("Press 'Enter' to continue...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 	mod.Free()
 
 	p, _ = mod1.ProcAddressByName(funcs)
 	fmt.Printf("Syscall_%s: 0x%x\n", funcs, p)
+	fmt.Print("Press 'Enter' to continue...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+	syscall.SyscallN(p)
+
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
 
