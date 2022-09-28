@@ -1,0 +1,4 @@
+github.com/moloch--/memmod v0.0.0-20211120144554-8b37cc654945 h1:m3yCfV8Vqp4MF1B+gPPjbjINdufl0UXqyYplE0aGhx8=
+github.com/moloch--/memmod v0.0.0-20211120144554-8b37cc654945/go.mod h1:1grVt4HaTofvhFUZYtofeRbGXfczNwCie9MYoM4lP/o=
+golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1 h1:kwrAHlwJ0DUBZwQ238v+Uod/3eZ8B2K5rYsUHBQvzmI=
+golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
