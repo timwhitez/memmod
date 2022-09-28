@@ -22,7 +22,14 @@ type addressList struct {
 	address uintptr
 }
 
-func nfvm(address uintptr, size uintptr, freetype uint32) {
+func nfvm(address uintptr, size uintptr, freetype uint32) error {
+	NFVM, _ := gabh.GetSSNByNameExcept(string([]byte{'N', 't', 'F', 'r', 'e', 'e', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'}), nil)
+	call := gabh.GetRecyCall("", nil, nil)
+	_, err := gabh.ReCycall(uint16(NFVM), call, 0xffffffffffffffff, uintptr(unsafe.Pointer(&address)), uintptr(unsafe.Pointer(&size)), uintptr(freetype))
+	return err
+}
+
+func nfvm_noSys(address uintptr, size uintptr, freetype uint32) {
 	NFVM := syscall.NewLazyDLL(string([]byte{'n', 't', 'd', 'l', 'l'})).NewProc(string([]byte{'N', 't', 'F', 'r', 'e', 'e', 'V', 'i', 'r', 't', 'u', 'a', 'l', 'M', 'e', 'm', 'o', 'r', 'y'})).Addr()
 	syscall.Syscall6(NFVM, 4, 0xffffffffffffffff, uintptr(unsafe.Pointer(&address)), uintptr(unsafe.Pointer(&size)), uintptr(freetype), 0, 0)
 }
@@ -93,9 +100,14 @@ func nva(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
 	return addr, nil
 }
 
-func (head *addressList) free() {
+func (head *addressList) free(scall bool) {
 	for node := head; node != nil; node = node.next {
-		nfvm(node.address, 0, windows.MEM_RELEASE)
+		if scall == true {
+			nfvm(node.address, 0, windows.MEM_RELEASE)
+		} else {
+			nfvm_noSys(node.address, 0, windows.MEM_RELEASE)
+		}
+
 	}
 }
 
@@ -223,7 +235,12 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 			(sectionData.last ||
 				(sectionData.size%uintptr(module.headers.OptionalHeader.SectionAlignment)) == 0) {
 			// Only allowed to decommit whole pages.
-			nfvm(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
+			if module.syscall == true {
+				nfvm(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
+			} else {
+				nfvm_noSys(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
+			}
+
 		}
 		return nil
 	}
@@ -913,11 +930,20 @@ func (module *Module) Free() {
 		module.modules = nil
 	}
 	if module.codeBase != 0 {
-		nfvm(module.codeBase, 0, windows.MEM_RELEASE)
+		if module.syscall == true {
+			nfvm(module.codeBase, 0, windows.MEM_RELEASE)
+		} else {
+			nfvm_noSys(module.codeBase, 0, windows.MEM_RELEASE)
+		}
 		module.codeBase = 0
 	}
 	if module.blockedMemory != nil {
-		module.blockedMemory.free()
+		if module.syscall == true {
+			module.blockedMemory.free(true)
+		} else {
+			module.blockedMemory.free(false)
+		}
+
 		module.blockedMemory = nil
 	}
 }
