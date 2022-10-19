@@ -288,7 +288,7 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 	return nil
 }
 
-var rtlAddFunctionTable = windows.NewLazySystemDLL("ntdll.dll").NewProc("RtlAddFunctionTable")
+var rtlAddFunctionTable = windows.NewLazySystemDLL(string([]byte{'n', 't', 'd', 'l', 'l'})).NewProc("RtlAddFunctionTable")
 
 func (module *Module) registerExceptionHandlers() {
 	directory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_EXCEPTION)
@@ -546,12 +546,12 @@ func hookRtlPcToFileHeader(scall bool) error {
 	importDescriptor := (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(imageBase, (importsDirectory.VirtualAddress)))
 	for ; importDescriptor.Name != 0; importDescriptor = (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(unsafe.Pointer(importDescriptor), (unsafe.Sizeof(*importDescriptor)))) {
 		libraryName := windows.BytePtrToString((*byte)(unsafe.Add(imageBase, (importDescriptor.Name))))
-		if strings.EqualFold(libraryName, "ntdll.dll") {
+		if strings.EqualFold(libraryName, string([]byte{'n', 't', 'd', 'l', 'l'})) {
 			break
 		}
 	}
 	if importDescriptor.Name == 0 {
-		return errors.New("ntdll.dll not found")
+		return errors.New(string([]byte{'n', 't', 'd', 'l', 'l'})+" not found")
 	}
 	originalThunk := (*uintptr)(unsafe.Add(imageBase, (importDescriptor.OriginalFirstThunk())))
 	thunk := (*uintptr)(unsafe.Add(imageBase, (importDescriptor.FirstThunk)))
@@ -620,7 +620,7 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	}
 	oldHeader := (*IMAGE_NT_HEADERS)(a2p(addr + uintptr(dosHeader.E_lfanew)))
 
-	ntdllHandler, _ := syscall.LoadLibrary("ntdll.dll")
+	ntdllHandler, _ := syscall.LoadLibrary(string([]byte{'n', 't', 'd', 'l', 'l'}))
 	//todo 改成ldr函数或者手动导入
 	NtUnmapViewOfSection, _ := syscall.GetProcAddress(ntdllHandler, "NtUnmapViewOfSection")
 	syscall.Syscall(NtUnmapViewOfSection, 2, uintptr(0xffffffffffffffff), uintptr(oldHeader.OptionalHeader.ImageBase), 0)
@@ -803,7 +803,7 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 	}
 	oldHeader := (*IMAGE_NT_HEADERS)(a2p(addr + uintptr(dosHeader.E_lfanew)))
 
-	ntdllHandler, _ := syscall.LoadLibrary("ntdll.dll")
+	ntdllHandler, _ := syscall.LoadLibrary(string([]byte{'n', 't', 'd', 'l', 'l'}))
 	//todo 改成ldr函数或者手动导入
 	NtUnmapViewOfSection, _ := syscall.GetProcAddress(ntdllHandler, "NtUnmapViewOfSection")
 	syscall.Syscall(NtUnmapViewOfSection, 2, uintptr(0xffffffffffffffff), uintptr(oldHeader.OptionalHeader.ImageBase), 0)
