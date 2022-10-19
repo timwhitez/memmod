@@ -124,6 +124,14 @@ type Module struct {
 	syscall       bool
 }
 
+func (module *Module) ModuleBase() uintptr {
+	return module.codeBase
+}
+
+func (module *Module) EntryPoint() uintptr {
+	return module.entry
+}
+
 func (module *Module) headerDirectory(idx int) *IMAGE_DATA_DIRECTORY {
 	return &module.headers.OptionalHeader.DataDirectory[idx]
 }
@@ -461,10 +469,21 @@ func (module *Module) buildImportTable() error {
 		}
 		for *thunkRef != 0 {
 			if IMAGE_SNAP_BY_ORDINAL(*thunkRef) {
+				//todo 改成ldr函数或者手动导入
 				*funcRef, err = windows.GetProcAddressByOrdinal(handle, IMAGE_ORDINAL(*thunkRef))
 			} else {
 				thunkData := (*IMAGE_IMPORT_BY_NAME)(a2p(module.codeBase + *thunkRef))
-				*funcRef, err = windows.GetProcAddress(handle, windows.BytePtrToString(&thunkData.Name[0]))
+				if windows.BytePtrToString(&thunkData.Name[0]) == "exit" ||
+					windows.BytePtrToString(&thunkData.Name[0]) == "_exit" {
+					//todo 改成ldr函数或者手动导入
+					*funcRef, err = windows.GetProcAddress(handle, "_c_exit")
+				} else if windows.BytePtrToString(&thunkData.Name[0]) == "ExitProcess" {
+					//todo 改成ldr函数或者手动导入
+					*funcRef, err = windows.GetProcAddress(handle, "ExitThread")
+				} else {
+					//todo 改成ldr函数或者手动导入
+					*funcRef, err = windows.GetProcAddress(handle, windows.BytePtrToString(&thunkData.Name[0]))
+				}
 			}
 			if err != nil {
 				windows.FreeLibrary(handle)
@@ -515,6 +534,7 @@ var hookRtlPcToFileHeaderResult error
 
 func hookRtlPcToFileHeader(scall bool) error {
 	var kernelBase windows.Handle
+	//todo 改成ldr函数或者手动导入
 	err := windows.GetModuleHandleEx(windows.GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, windows.StringToUTF16Ptr("kernelbase.dll"), &kernelBase)
 	if err != nil {
 		return err
@@ -585,6 +605,7 @@ func hookRtlPcToFileHeader(scall bool) error {
 
 // LoadLibrary loads module image to memory.
 func LoadLibrary(data []byte) (module *Module, err error) {
+
 	addr := uintptr(unsafe.Pointer(&data[0]))
 	size := uintptr(len(data))
 	if size < unsafe.Sizeof(IMAGE_DOS_HEADER{}) {
@@ -598,6 +619,12 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		return nil, errors.New("Incomplete IMAGE_NT_HEADERS")
 	}
 	oldHeader := (*IMAGE_NT_HEADERS)(a2p(addr + uintptr(dosHeader.E_lfanew)))
+
+	ntdllHandler, _ := syscall.LoadLibrary("ntdll.dll")
+	//todo 改成ldr函数或者手动导入
+	NtUnmapViewOfSection, _ := syscall.GetProcAddress(ntdllHandler, "NtUnmapViewOfSection")
+	syscall.Syscall(NtUnmapViewOfSection, 2, uintptr(0xffffffffffffffff), uintptr(oldHeader.OptionalHeader.ImageBase), 0)
+
 	if oldHeader.Signature != IMAGE_NT_SIGNATURE {
 		return nil, fmt.Errorf("Not an NT binary (provided: %x, expected: %x)", oldHeader.Signature, IMAGE_NT_SIGNATURE)
 	}
@@ -733,6 +760,7 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	// Get entry point of loaded module.
 	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
 		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
+		memset(uintptr(unsafe.Pointer(&data[0])), 0, uintptr(module.headers.OptionalHeader.SizeOfImage))
 		if module.isDLL {
 			// Notify library about attaching to process.
 			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
@@ -742,11 +770,21 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 				return
 			}
 			module.initialized = true
+		} else {
+			memset(module.codeBase, 0, uintptr(module.headers.OptionalHeader.SizeOfHeaders))
 		}
 	}
 
 	module.buildNameExports()
 	return
+}
+
+func memset(ptr uintptr, c byte, n uintptr) {
+	var i uintptr
+	for i = 0; i < n; i++ {
+		pByte := (*byte)(unsafe.Pointer(ptr + i))
+		*pByte = c
+	}
 }
 
 // LoadLibrary loads module image to memory.
@@ -764,6 +802,12 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 		return nil, errors.New("Incomplete IMAGE_NT_HEADERS")
 	}
 	oldHeader := (*IMAGE_NT_HEADERS)(a2p(addr + uintptr(dosHeader.E_lfanew)))
+
+	ntdllHandler, _ := syscall.LoadLibrary("ntdll.dll")
+	//todo 改成ldr函数或者手动导入
+	NtUnmapViewOfSection, _ := syscall.GetProcAddress(ntdllHandler, "NtUnmapViewOfSection")
+	syscall.Syscall(NtUnmapViewOfSection, 2, uintptr(0xffffffffffffffff), uintptr(oldHeader.OptionalHeader.ImageBase), 0)
+
 	if oldHeader.Signature != IMAGE_NT_SIGNATURE {
 		return nil, fmt.Errorf("Not an NT binary (provided: %x, expected: %x)", oldHeader.Signature, IMAGE_NT_SIGNATURE)
 	}
@@ -899,6 +943,7 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 	// Get entry point of loaded module.
 	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
 		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
+		memset(uintptr(unsafe.Pointer(&data[0])), 0, uintptr(module.headers.OptionalHeader.SizeOfImage))
 		if module.isDLL {
 			// Notify library about attaching to process.
 			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
@@ -908,6 +953,8 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 				return
 			}
 			module.initialized = true
+		} else {
+			memset(module.codeBase, 0, uintptr(module.headers.OptionalHeader.SizeOfHeaders))
 		}
 	}
 
