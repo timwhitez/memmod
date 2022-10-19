@@ -25,7 +25,12 @@ func main() {
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
 
-	mod1, e := memmod.LoadLibrarySyscall(f)
+	f1, e := os.ReadFile(dllfile)
+	if e != nil {
+		panic(e)
+	}
+	
+	mod1, e := memmod.LoadLibrarySyscall(f1)
 	if e != nil {
 		panic(e)
 	}
