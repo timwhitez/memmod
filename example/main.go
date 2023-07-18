@@ -29,7 +29,7 @@ func main() {
 	if e != nil {
 		panic(e)
 	}
-	
+
 	mod1, e := memmod.LoadLibrarySyscall(f1)
 	if e != nil {
 		panic(e)
@@ -42,7 +42,9 @@ func main() {
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
 
-	syscall.SyscallN(p)
+	if p != 0 {
+		syscall.SyscallN(p)
+	}
 
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
@@ -52,7 +54,9 @@ func main() {
 	fmt.Printf("Syscall_%s: 0x%x\n", funcs, p)
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
-	syscall.SyscallN(p)
+	if p != 0 {
+		syscall.SyscallN(p)
+	}
 
 	fmt.Print("Press 'Enter' to continue...")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')

@@ -13,8 +13,47 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+)
 
-	"golang.org/x/sys/windows"
+const (
+	MEM_COMMIT      = 0x00001000
+	MEM_RESERVE     = 0x00002000
+	MEM_DECOMMIT    = 0x00004000
+	MEM_RELEASE     = 0x00008000
+	MEM_RESET       = 0x00080000
+	MEM_TOP_DOWN    = 0x00100000
+	MEM_WRITE_WATCH = 0x00200000
+	MEM_PHYSICAL    = 0x00400000
+	MEM_RESET_UNDO  = 0x01000000
+	MEM_LARGE_PAGES = 0x20000000
+
+	PAGE_NOACCESS                                              = 0x00000001
+	PAGE_READONLY                                              = 0x00000002
+	PAGE_READWRITE                                             = 0x00000004
+	PAGE_WRITECOPY                                             = 0x00000008
+	PAGE_EXECUTE                                               = 0x00000010
+	PAGE_EXECUTE_READ                                          = 0x00000020
+	PAGE_EXECUTE_READWRITE                                     = 0x00000040
+	PAGE_EXECUTE_WRITECOPY                                     = 0x00000080
+	PAGE_GUARD                                                 = 0x00000100
+	PAGE_NOCACHE                                               = 0x00000200
+	PAGE_WRITECOMBINE                                          = 0x00000400
+	PAGE_TARGETS_INVALID                                       = 0x40000000
+	PAGE_TARGETS_NO_UPDATE                                     = 0x40000000
+	ERROR_DLL_INIT_FAILED                        syscall.Errno = 1114
+	GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT               = 2
+
+	QUOTA_LIMITS_HARDWS_MIN_DISABLE = 0x00000002
+	QUOTA_LIMITS_HARDWS_MIN_ENABLE  = 0x00000001
+	QUOTA_LIMITS_HARDWS_MAX_DISABLE = 0x00000008
+	QUOTA_LIMITS_HARDWS_MAX_ENABLE  = 0x00000004
+
+	errnoERROR_IO_PENDING = 997
+)
+
+var (
+	errERROR_IO_PENDING error = syscall.Errno(errnoERROR_IO_PENDING)
+	errERROR_EINVAL     error = syscall.EINVAL
 )
 
 type addressList struct {
@@ -103,9 +142,9 @@ func nva(addr, size uintptr, allocType, protect uint32) (uintptr, error) {
 func (head *addressList) free(scall bool) {
 	for node := head; node != nil; node = node.next {
 		if scall == true {
-			nfvm(node.address, 0, windows.MEM_RELEASE)
+			nfvm(node.address, 0, MEM_RELEASE)
 		} else {
-			nfvm_noSys(node.address, 0, windows.MEM_RELEASE)
+			nfvm_noSys(node.address, 0, MEM_RELEASE)
 		}
 
 	}
@@ -114,7 +153,7 @@ func (head *addressList) free(scall bool) {
 type Module struct {
 	headers       *IMAGE_NT_HEADERS
 	codeBase      uintptr
-	modules       []windows.Handle
+	modules       []uintptr
 	initialized   bool
 	isDLL         bool
 	isRelocated   bool
@@ -150,13 +189,13 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 			if module.syscall {
 				dest, err = nva(module.codeBase+uintptr(sections[i].VirtualAddress),
 					uintptr(sectionSize),
-					windows.MEM_COMMIT,
-					windows.PAGE_READWRITE)
+					MEM_COMMIT,
+					PAGE_READWRITE)
 			} else {
 				dest, err = nva_noSys(module.codeBase+uintptr(sections[i].VirtualAddress),
 					uintptr(sectionSize),
-					windows.MEM_COMMIT,
-					windows.PAGE_READWRITE)
+					MEM_COMMIT,
+					PAGE_READWRITE)
 			}
 
 			if err != nil {
@@ -185,13 +224,13 @@ func (module *Module) copySections(address uintptr, size uintptr, oldHeaders *IM
 		if module.syscall {
 			dest, err = nva(module.codeBase+uintptr(sections[i].VirtualAddress),
 				uintptr(sections[i].SizeOfRawData),
-				windows.MEM_COMMIT,
-				windows.PAGE_READWRITE)
+				MEM_COMMIT,
+				PAGE_READWRITE)
 		} else {
 			dest, err = nva_noSys(module.codeBase+uintptr(sections[i].VirtualAddress),
 				uintptr(sections[i].SizeOfRawData),
-				windows.MEM_COMMIT,
-				windows.PAGE_READWRITE)
+				MEM_COMMIT,
+				PAGE_READWRITE)
 		}
 
 		if err != nil {
@@ -244,9 +283,9 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 				(sectionData.size%uintptr(module.headers.OptionalHeader.SectionAlignment)) == 0) {
 			// Only allowed to decommit whole pages.
 			if module.syscall == true {
-				nfvm(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
+				nfvm(sectionData.address, sectionData.size, MEM_DECOMMIT)
 			} else {
-				nfvm_noSys(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
+				nfvm_noSys(sectionData.address, sectionData.size, MEM_DECOMMIT)
 			}
 
 		}
@@ -255,18 +294,18 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 
 	// determine protection flags based on characteristics
 	var ProtectionFlags = [8]uint32{
-		windows.PAGE_NOACCESS,          // not writeable, not readable, not executable
-		windows.PAGE_EXECUTE,           // not writeable, not readable, executable
-		windows.PAGE_READONLY,          // not writeable, readable, not executable
-		windows.PAGE_EXECUTE_READ,      // not writeable, readable, executable
-		windows.PAGE_WRITECOPY,         // writeable, not readable, not executable
-		windows.PAGE_EXECUTE_WRITECOPY, // writeable, not readable, executable
-		windows.PAGE_READWRITE,         // writeable, readable, not executable
-		windows.PAGE_EXECUTE_READWRITE, // writeable, readable, executable
+		PAGE_NOACCESS,          // not writeable, not readable, not executable
+		PAGE_EXECUTE,           // not writeable, not readable, executable
+		PAGE_READONLY,          // not writeable, readable, not executable
+		PAGE_EXECUTE_READ,      // not writeable, readable, executable
+		PAGE_WRITECOPY,         // writeable, not readable, not executable
+		PAGE_EXECUTE_WRITECOPY, // writeable, not readable, executable
+		PAGE_READWRITE,         // writeable, readable, not executable
+		PAGE_EXECUTE_READWRITE, // writeable, readable, executable
 	}
 	protect := ProtectionFlags[sectionData.characteristics>>29]
 	if (sectionData.characteristics & IMAGE_SCN_MEM_NOT_CACHED) != 0 {
-		protect |= windows.PAGE_NOCACHE
+		protect |= PAGE_NOCACHE
 	}
 
 	// Change memory access flags.
@@ -288,7 +327,7 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 	return nil
 }
 
-var rtlAddFunctionTable = windows.NewLazySystemDLL(string([]byte{'n', 't', 'd', 'l', 'l', '.', 'd', 'l', 'l'})).NewProc("RtlAddFunctionTable")
+var rtlAddFunctionTable = syscall.NewLazyDLL(string([]byte{'n', 't', 'd', 'l', 'l', '.', 'd', 'l', 'l'})).NewProc(string([]byte("RtlAddFunctionTable")))
 
 func (module *Module) registerExceptionHandlers() {
 	directory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_EXCEPTION)
@@ -445,19 +484,80 @@ func (module *Module) performBaseRelocation(delta uintptr) (relocated bool, err 
 	return true, nil
 }
 
+func bytePtrToString(p *uint8) string {
+	a := (*[10000]uint8)(unsafe.Pointer(p))
+	i := 0
+	for a[i] != 0 {
+		i++
+	}
+	return string(a[:i])
+}
+
+func errnoErr(e syscall.Errno) error {
+	switch e {
+	case 0:
+		return errERROR_EINVAL
+	case errnoERROR_IO_PENDING:
+		return errERROR_IO_PENDING
+	}
+	return e
+}
+
+func LoadLibraryEx(libname string, zero uintptr, flags uintptr) (handle uintptr, err error) {
+	var _p0 *uint16
+	_p0, err = syscall.UTF16PtrFromString(libname)
+	if err != nil {
+		return
+	}
+
+	procLoadLibraryExW := syscall.NewLazyDLL(string([]byte("kernel32"))).NewProc(string([]byte("LoadLibraryExW")))
+	r0, _, e1 := syscall.Syscall(procLoadLibraryExW.Addr(), 3, uintptr(unsafe.Pointer(_p0)), uintptr(zero), uintptr(flags))
+	handle = r0
+	if handle == 0 {
+		err = errnoErr(e1)
+	}
+
+	return
+}
+
+func GetProcAddressByOrdinal(module uintptr, ordinal uintptr) (proc uintptr, err error) {
+	procGetProcAddress := syscall.NewLazyDLL(string([]byte("kernel32"))).NewProc(string([]byte("GetProcAddress")))
+	r0, _, e1 := syscall.Syscall(procGetProcAddress.Addr(), 2, uintptr(module), ordinal, 0)
+	proc = uintptr(r0)
+	if proc == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func GetProcAddress(module uintptr, procname string) (proc uintptr, err error) {
+	var _p0 *byte
+	_p0, err = syscall.BytePtrFromString(procname)
+	if err != nil {
+		return
+	}
+	procGetProcAddress := syscall.NewLazyDLL(string([]byte("kernel32"))).NewProc(string([]byte("GetProcAddress")))
+	r0, _, e1 := syscall.Syscall(procGetProcAddress.Addr(), 2, uintptr(module), uintptr(unsafe.Pointer(_p0)), 0)
+	proc = uintptr(r0)
+	if proc == 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+const LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x800
+
 func (module *Module) buildImportTable() error {
 	directory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT)
 	if directory.Size == 0 {
 		return nil
 	}
 
-	module.modules = make([]windows.Handle, 0, 16)
+	module.modules = make([]uintptr, 0, 16)
 	importDesc := (*IMAGE_IMPORT_DESCRIPTOR)(a2p(module.codeBase + uintptr(directory.VirtualAddress)))
+
 	for importDesc.Name != 0 {
-		handle, err := windows.LoadLibraryEx(windows.BytePtrToString((*byte)(a2p(module.codeBase+uintptr(importDesc.Name)))), 0, windows.LOAD_LIBRARY_SEARCH_SYSTEM32)
-		if err != nil {
-			return fmt.Errorf("Error loading module: %w", err)
-		}
+		handle, err := LoadLibraryEx(bytePtrToString((*byte)(a2p(module.codeBase+uintptr(importDesc.Name)))), 0, LOAD_LIBRARY_SEARCH_SYSTEM32)
 		var thunkRef, funcRef *uintptr
 		if importDesc.OriginalFirstThunk() != 0 {
 			thunkRef = (*uintptr)(a2p(module.codeBase + uintptr(importDesc.OriginalFirstThunk())))
@@ -470,23 +570,23 @@ func (module *Module) buildImportTable() error {
 		for *thunkRef != 0 {
 			if IMAGE_SNAP_BY_ORDINAL(*thunkRef) {
 				//todo 改成ldr函数或者手动导入
-				*funcRef, err = windows.GetProcAddressByOrdinal(handle, IMAGE_ORDINAL(*thunkRef))
+				*funcRef, err = GetProcAddressByOrdinal(handle, IMAGE_ORDINAL(*thunkRef))
 			} else {
 				thunkData := (*IMAGE_IMPORT_BY_NAME)(a2p(module.codeBase + *thunkRef))
-				if windows.BytePtrToString(&thunkData.Name[0]) == "exit" ||
-					windows.BytePtrToString(&thunkData.Name[0]) == "_exit" {
+				if bytePtrToString(&thunkData.Name[0]) == "exit" ||
+					bytePtrToString(&thunkData.Name[0]) == "_exit" {
 					//todo 改成ldr函数或者手动导入
-					*funcRef, err = windows.GetProcAddress(handle, "_c_exit")
-				} else if windows.BytePtrToString(&thunkData.Name[0]) == "ExitProcess" {
+					*funcRef, err = GetProcAddress(handle, "_c_exit")
+				} else if bytePtrToString(&thunkData.Name[0]) == "ExitProcess" {
 					//todo 改成ldr函数或者手动导入
-					*funcRef, err = windows.GetProcAddress(handle, "ExitThread")
+					*funcRef, err = GetProcAddress(handle, "ExitThread")
 				} else {
 					//todo 改成ldr函数或者手动导入
-					*funcRef, err = windows.GetProcAddress(handle, windows.BytePtrToString(&thunkData.Name[0]))
+					*funcRef, err = GetProcAddress(handle, bytePtrToString(&thunkData.Name[0]))
 				}
 			}
 			if err != nil {
-				windows.FreeLibrary(handle)
+				syscall.FreeLibrary(syscall.Handle(handle))
 				return fmt.Errorf("Error getting function address: %w", err)
 			}
 			thunkRef = (*uintptr)(a2p(uintptr(unsafe.Pointer(thunkRef)) + unsafe.Sizeof(*thunkRef)))
@@ -516,7 +616,7 @@ func (module *Module) buildNameExports() error {
 	unsafeSlice(unsafe.Pointer(&ordinals), a2p(module.codeBase+uintptr(exports.AddressOfNameOrdinals)), int(exports.NumberOfNames))
 	module.nameExports = make(map[string]uint16)
 	for i := range nameRefs {
-		nameArray := windows.BytePtrToString((*byte)(a2p(module.codeBase + uintptr(nameRefs[i]))))
+		nameArray := bytePtrToString((*byte)(a2p(module.codeBase + uintptr(nameRefs[i]))))
 		module.nameExports[nameArray] = ordinals[i]
 	}
 	return nil
@@ -533,11 +633,13 @@ var haveHookedRtlPcToFileHeader sync.Once
 var hookRtlPcToFileHeaderResult error
 
 func hookRtlPcToFileHeader(scall bool) error {
-	var kernelBase windows.Handle
+	var kernelBase uintptr
 	//todo 改成ldr函数或者手动导入
-	err := windows.GetModuleHandleEx(windows.GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, windows.StringToUTF16Ptr("kernelbase.dll"), &kernelBase)
-	if err != nil {
-		return err
+	kb, _ := syscall.UTF16PtrFromString(string([]byte("kernelbase.dll")))
+	gmhex := syscall.NewLazyDLL(string([]byte("kernel32"))).NewProc(string([]byte("GetModuleHandleExW")))
+	r, _, e := syscall.SyscallN(gmhex.Addr(), GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, uintptr(unsafe.Pointer(kb)), uintptr(unsafe.Pointer(&kernelBase)))
+	if r == 0 {
+		return errnoErr(e)
 	}
 	imageBase := unsafe.Pointer(kernelBase)
 	dosHeader := (*IMAGE_DOS_HEADER)(imageBase)
@@ -545,7 +647,7 @@ func hookRtlPcToFileHeader(scall bool) error {
 	importsDirectory := ntHeaders.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
 	importDescriptor := (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(imageBase, (importsDirectory.VirtualAddress)))
 	for ; importDescriptor.Name != 0; importDescriptor = (*IMAGE_IMPORT_DESCRIPTOR)(unsafe.Add(unsafe.Pointer(importDescriptor), (unsafe.Sizeof(*importDescriptor)))) {
-		libraryName := windows.BytePtrToString((*byte)(unsafe.Add(imageBase, (importDescriptor.Name))))
+		libraryName := bytePtrToString((*byte)(unsafe.Add(imageBase, (importDescriptor.Name))))
 		if strings.EqualFold(libraryName, string([]byte{'n', 't', 'd', 'l', 'l', '.', 'd', 'l', 'l'})) {
 			break
 		}
@@ -558,7 +660,7 @@ func hookRtlPcToFileHeader(scall bool) error {
 	for ; *originalThunk != 0; originalThunk = (*uintptr)(unsafe.Add(unsafe.Pointer(originalThunk), (unsafe.Sizeof(*originalThunk)))) {
 		if *originalThunk&IMAGE_ORDINAL_FLAG == 0 {
 			function := (*IMAGE_IMPORT_BY_NAME)(unsafe.Add(imageBase, (*originalThunk)))
-			name := windows.BytePtrToString(&function.Name[0])
+			name := bytePtrToString(&function.Name[0])
 			if name == "RtlPcToFileHeader" {
 				break
 			}
@@ -569,17 +671,18 @@ func hookRtlPcToFileHeader(scall bool) error {
 		return errors.New("RtlPcToFileHeader not found")
 	}
 	var oldProtect uint32
+	var err error
 	if scall {
-		err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), windows.PAGE_READWRITE, &oldProtect)
+		err = npvm(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), PAGE_READWRITE, &oldProtect)
 	} else {
-		err = npvm_noSys(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), windows.PAGE_READWRITE, &oldProtect)
+		err = npvm_noSys(uintptr(unsafe.Pointer(thunk)), unsafe.Sizeof(*thunk), PAGE_READWRITE, &oldProtect)
 	}
 
 	if err != nil {
 		return err
 	}
 	originalRtlPcToFileHeader := *thunk
-	*thunk = windows.NewCallback(func(pcValue uintptr, baseOfImage *uintptr) uintptr {
+	*thunk = syscall.NewCallback(func(pcValue uintptr, baseOfImage *uintptr) uintptr {
 		loadedAddressRangesMu.RLock()
 		for i := range loadedAddressRanges {
 			if pcValue >= loadedAddressRanges[i].start && pcValue < loadedAddressRanges[i].end {
@@ -667,14 +770,14 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	// TODO: Is it correct to commit the complete memory region at once? Calling DllEntry raises an exception if we don't.
 	module.codeBase, err = nva_noSys(oldHeader.OptionalHeader.ImageBase,
 		alignedImageSize,
-		windows.MEM_RESERVE|windows.MEM_COMMIT,
-		windows.PAGE_READWRITE)
+		MEM_RESERVE|MEM_COMMIT,
+		PAGE_READWRITE)
 	if err != nil {
 		// Try to allocate memory at arbitrary position.
 		module.codeBase, err = nva_noSys(0,
 			alignedImageSize,
-			windows.MEM_RESERVE|windows.MEM_COMMIT,
-			windows.PAGE_READWRITE)
+			MEM_RESERVE|MEM_COMMIT,
+			PAGE_READWRITE)
 		if err != nil {
 			err = fmt.Errorf("Error allocating code: %w", err)
 			return
@@ -693,8 +796,8 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	// Commit memory for headers.
 	headers, err := nva_noSys(module.codeBase,
 		uintptr(oldHeader.OptionalHeader.SizeOfHeaders),
-		windows.MEM_COMMIT,
-		windows.PAGE_READWRITE)
+		MEM_COMMIT,
+		PAGE_READWRITE)
 	if err != nil {
 		err = fmt.Errorf("Error allocating headers: %w", err)
 		return
@@ -766,7 +869,7 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
 			successful := r0 != 0
 			if !successful {
-				err = windows.ERROR_DLL_INIT_FAILED
+				err = ERROR_DLL_INIT_FAILED
 				return
 			}
 			module.initialized = true
@@ -850,14 +953,14 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 	// TODO: Is it correct to commit the complete memory region at once? Calling DllEntry raises an exception if we don't.
 	module.codeBase, err = nva(oldHeader.OptionalHeader.ImageBase,
 		alignedImageSize,
-		windows.MEM_RESERVE|windows.MEM_COMMIT,
-		windows.PAGE_READWRITE)
+		MEM_RESERVE|MEM_COMMIT,
+		PAGE_READWRITE)
 	if err != nil {
 		// Try to allocate memory at arbitrary position.
 		module.codeBase, err = nva(0,
 			alignedImageSize,
-			windows.MEM_RESERVE|windows.MEM_COMMIT,
-			windows.PAGE_READWRITE)
+			MEM_RESERVE|MEM_COMMIT,
+			PAGE_READWRITE)
 		if err != nil {
 			err = fmt.Errorf("Error allocating code: %w", err)
 			return
@@ -876,8 +979,8 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 	// Commit memory for headers.
 	headers, err := nva(module.codeBase,
 		uintptr(oldHeader.OptionalHeader.SizeOfHeaders),
-		windows.MEM_COMMIT,
-		windows.PAGE_READWRITE)
+		MEM_COMMIT,
+		PAGE_READWRITE)
 	if err != nil {
 		err = fmt.Errorf("Error allocating headers: %w", err)
 		return
@@ -949,7 +1052,7 @@ func LoadLibrarySyscall(data []byte) (module *Module, err error) {
 			r0, _, _ := syscall.Syscall(module.entry, 3, module.codeBase, uintptr(DLL_PROCESS_ATTACH), 0)
 			successful := r0 != 0
 			if !successful {
-				err = windows.ERROR_DLL_INIT_FAILED
+				err = ERROR_DLL_INIT_FAILED
 				return
 			}
 			module.initialized = true
@@ -972,15 +1075,15 @@ func (module *Module) Free() {
 	if module.modules != nil {
 		// Free previously opened libraries.
 		for _, handle := range module.modules {
-			windows.FreeLibrary(handle)
+			syscall.FreeLibrary(syscall.Handle(handle))
 		}
 		module.modules = nil
 	}
 	if module.codeBase != 0 {
 		if module.syscall == true {
-			nfvm(module.codeBase, 0, windows.MEM_RELEASE)
+			nfvm(module.codeBase, 0, MEM_RELEASE)
 		} else {
-			nfvm_noSys(module.codeBase, 0, windows.MEM_RELEASE)
+			nfvm_noSys(module.codeBase, 0, MEM_RELEASE)
 		}
 		module.codeBase = 0
 	}
