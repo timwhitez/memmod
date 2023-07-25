@@ -6,6 +6,12 @@ Fork of Wireguard's memmod module
 change virtualfree,virtualprotect,virtualalloc to Nt api Recycled Gate
 
 ## todo
+参考项目:
+
+https://github.com/Octoberfest7/Inline-Execute-PE/
+
+https://github.com/timwhitez/Doge-MemX
+
 1. 挂钩与命令行参数和退出进程相关的某些 API
 2. runpe 传参
 3. 捕获完整输出
