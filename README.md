@@ -6,8 +6,11 @@ Fork of Wireguard's memmod module
 change virtualfree,virtualprotect,virtualalloc to Nt api Recycled Gate
 
 ## todo
-1. runpe 传参
-2. 捕获完整输出
+1. 挂钩与命令行参数和退出进程相关的某些 API
+2. runpe 传参
+3. 捕获完整输出
+4. 在内存加密上做一些思考
+5. 敏感字符串替换
 ```
 在当前进程下使用CreateThread加载一个解析过的PE文件，要完整捕获该PE的stdout和stderr输出，你可以尝试以下步骤：
 
