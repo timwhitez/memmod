@@ -163,6 +163,11 @@ type Module struct {
 	syscall       bool
 }
 
+func (module *Module) Headers() *IMAGE_NT_HEADERS {
+	return module.headers
+}
+
+
 func (module *Module) ModuleBase() uintptr {
 	return module.codeBase
 }
